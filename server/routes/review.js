@@ -270,9 +270,17 @@ router.post('/', async (req, res) => {
     if (!code || code.trim().length === 0) {
       return res.status(400).json({ error: 'Code không được để trống' });
     }
+    
+    // Cảnh báo nếu code quá dài
+    if (code.length > 20000) {
+      console.log(`⚠️ Code rất dài (${code.length} chars), có thể bị cắt response`);
+    }
 
-    // Create prompt
+    // Create prompt (tự động giới hạn độ dài code nếu quá dài)
     const prompt = createReviewPrompt(code, language || 'javascript');
+    
+    // Log thông tin về prompt
+    console.log(`📝 Prompt length: ${prompt.length} characters, Code length: ${code.length} characters`);
 
     // Call OpenRoute API với fallback models và luân phiên khi rate limit
     const allModels = [
@@ -310,7 +318,7 @@ router.post('/', async (req, res) => {
                 }
               ],
               temperature: 0.7,
-              max_tokens: 4000
+              max_tokens: 10000 // Tăng lên 8000 để tránh bị cắt ngắn
             },
             {
               headers: {
@@ -490,16 +498,106 @@ router.post('/', async (req, res) => {
       );
     }
 
-    if (!response.data || !response.data.choices || !response.data.choices[0]) {
-      console.error('Invalid API response:', response.data);
-      throw new Error('Response từ API không hợp lệ');
+    if (!response.data) {
+      console.error('No data in API response:', response);
+      throw new Error('Response từ API không có data');
     }
 
-    const aiResponse = response.data.choices[0]?.message?.content || '';
+    // Log response structure để debug
+    console.log('API Response structure:', {
+      hasChoices: !!response.data.choices,
+      choicesLength: response.data.choices?.length || 0,
+      firstChoice: response.data.choices?.[0] ? {
+        hasMessage: !!response.data.choices[0].message,
+        hasContent: !!response.data.choices[0].message?.content,
+        contentLength: response.data.choices[0].message?.content?.length || 0
+      } : null
+    });
+
+    if (!response.data.choices || !Array.isArray(response.data.choices) || response.data.choices.length === 0) {
+      console.error('Invalid API response - no choices:', JSON.stringify(response.data, null, 2));
+      throw new Error('Response từ API không có choices. Có thể model không hỗ trợ hoặc có lỗi từ API.');
+    }
+
+    const firstChoice = response.data.choices[0];
+    if (!firstChoice.message) {
+      console.error('Invalid API response - no message:', JSON.stringify(firstChoice, null, 2));
+      throw new Error('Response từ API không có message trong choice.');
+    }
+
+    let aiResponse = firstChoice.message.content || '';
+    const finishReason = firstChoice.finish_reason;
+    
+    // Nếu response bị cắt do length, thử request tiếp phần còn lại
+    if (finishReason === 'length' && aiResponse.trim().length > 0) {
+      console.log('⚠️ Response bị cắt ngắn, thử request tiếp phần còn lại...');
+      try {
+        // Request tiếp với prompt yêu cầu tiếp tục
+        const continueResponse = await axios.post(
+          OPENROUTE_API_URL,
+          {
+            model: usedModel,
+            messages: [
+              {
+                role: 'user',
+                content: prompt
+              },
+              {
+                role: 'assistant',
+                content: aiResponse
+              },
+              {
+                role: 'user',
+                content: 'Tiếp tục phần còn lại của response JSON. Chỉ trả về phần còn lại, không lặp lại phần đã có.'
+              }
+            ],
+            temperature: 0.7,
+            max_tokens: 4000
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${OPENROUTE_API_KEY}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'http://localhost:3001',
+              'X-Title': 'Code Review App'
+            },
+            timeout: 60000
+          }
+        );
+        
+        if (continueResponse.data?.choices?.[0]?.message?.content) {
+          const continuedContent = continueResponse.data.choices[0].message.content;
+          aiResponse += continuedContent;
+          console.log('✅ Đã lấy được phần tiếp theo của response');
+        }
+      } catch (continueError) {
+        console.warn('⚠️ Không thể lấy phần tiếp theo:', continueError.message);
+        // Vẫn tiếp tục với phần response đã có
+      }
+    }
     
     if (!aiResponse || aiResponse.trim().length === 0) {
-      throw new Error('API không trả về nội dung');
+      console.error('Empty content in response:', {
+        choice: firstChoice,
+        message: firstChoice.message,
+        finishReason: finishReason
+      });
+      
+      // Kiểm tra finish_reason
+      if (finishReason === 'length') {
+        // Nếu đã thử request tiếp mà vẫn rỗng
+        throw new Error('Response từ API bị cắt ngắn. Code của bạn có thể quá dài. Hãy thử review từng phần nhỏ hơn.');
+      }
+      
+      if (finishReason === 'content_filter') {
+        throw new Error('Response từ API bị lọc do nội dung không phù hợp.');
+      }
+      
+      throw new Error('API không trả về nội dung. Có thể model gặp vấn đề hoặc prompt quá dài.');
     }
+    
+    // Log thông tin về response
+    console.log(`📊 Response length: ${aiResponse.length} characters, finish_reason: ${finishReason}`);
     
     // Try to parse JSON from response
     let reviewData;

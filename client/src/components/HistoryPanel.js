@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import './HistoryPanel.css';
+import ReviewDetailModal from './ReviewDetailModal';
 
 const HistoryPanel = ({ onSelectReview }) => {
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [selectedReview, setSelectedReview] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     fetchHistory();
@@ -42,7 +45,16 @@ const HistoryPanel = ({ onSelectReview }) => {
       const response = await fetch(`http://localhost:5000/api/history/${id}`);
       const data = await response.json();
       if (data.success && data.review) {
-        onSelectReview({ review: data.review.review });
+        // Keep compatibility with parent callback
+        onSelectReview && onSelectReview({ review: data.review.review });
+        // Show modal locally
+        setSelectedReview({
+          fileName: data.review.fileName,
+          language: data.review.language,
+          createdAt: data.review.createdAt,
+          review: data.review.review
+        });
+        setModalOpen(true);
       }
     } catch (err) {
       alert('Lỗi khi tải chi tiết review');
@@ -98,6 +110,12 @@ const HistoryPanel = ({ onSelectReview }) => {
           )}
         </div>
       )}
+
+      <ReviewDetailModal
+        open={modalOpen}
+        reviewItem={selectedReview}
+        onClose={() => { setModalOpen(false); setSelectedReview(null); }}
+      />
     </div>
   );
 };

@@ -59,6 +59,13 @@ const ReviewResult = ({ review }) => {
   // Format text với xuống hàng và icon
   const formatText = (text) => {
     if (!text) return '';
+    if (typeof text !== 'string') {
+      try {
+        text = JSON.stringify(text, null, 2);
+      } catch {
+        text = String(text);
+      }
+    }
     // Thay thế \n thành xuống hàng thực sự
     const lines = text.split('\\n').map((line, index) => (
       <React.Fragment key={index}>
