@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const CodeReview = require('../models/CodeReview');
 
-const OPENROUTE_API_KEY = process.env.OPENROUTE_API_KEY || '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';
+const OPENROUTE_API_KEY = process.env.OPENROUTE_API_KEY ;
 const OPENROUTE_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Model rate limit tracking - lưu thời gian bị rate limit của mỗi model
@@ -257,6 +257,14 @@ Hãy phân tích chi tiết từng dòng code theo 6 nhóm yêu cầu trên và 
 // POST /api/review
 router.post('/', async (req, res) => {
   try {
+    // Kiểm tra API key
+    if (!OPENROUTE_API_KEY || OPENROUTE_API_KEY.trim().length === 0 || OPENROUTE_API_KEY.includes('your-api-key')) {
+      return res.status(500).json({ 
+        error: 'API key chưa được cấu hình', 
+        details: 'Vui lòng thêm OPENROUTE_API_KEY vào file server/.env' 
+      });
+    }
+
     const { code, language, fileName } = req.body;
 
     if (!code || code.trim().length === 0) {
