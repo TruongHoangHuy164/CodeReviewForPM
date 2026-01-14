@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const CodeReview = require('../models/CodeReview');
 
-const OPENROUTE_API_KEY = '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';
+const OPENROUTE_API_KEY = process.env.OPENROUTE_API_KEY || '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';
 const OPENROUTE_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 // Model rate limit tracking - lưu thời gian bị rate limit của mỗi model
@@ -323,6 +323,19 @@ router.post('/', async (req, res) => {
         } catch (apiError) {
           const status = apiError.response?.status;
           const errorMsg = apiError.response?.data?.error?.message || apiError.message;
+          const errorData = apiError.response?.data?.error;
+          
+          // Nếu là lỗi 401 (Unauthorized), không retry và không thử model khác
+          if (status === 401) {
+            console.error(`❌ Authentication failed (401) for ${model}`);
+            console.error('Error details:', errorData || errorMsg);
+            throw { 
+              type: 'AUTH_ERROR', 
+              model, 
+              error: apiError,
+              message: 'API key không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại API key trong file .env'
+            };
+          }
           
           // Nếu là rate limit (429), đánh dấu model và throw để thử model khác
           if (status === 429) {
@@ -341,6 +354,16 @@ router.post('/', async (req, res) => {
               errorMsg.includes('not a valid model') ||
               errorMsg.includes('model ID')) {
             throw { type: 'INVALID_MODEL', model, error: apiError };
+          }
+          
+          // Nếu là lỗi 402 (Payment Required), không retry
+          if (status === 402) {
+            throw { 
+              type: 'PAYMENT_ERROR', 
+              model, 
+              error: apiError,
+              message: 'Tài khoản API không đủ credit. Vui lòng nạp thêm credit.'
+            };
           }
           
           // Nếu là lỗi khác và không phải lần thử cuối, retry
@@ -386,6 +409,16 @@ router.post('/', async (req, res) => {
         const status = apiError.response?.status;
         
         console.log(`❌ Model ${model} failed: ${errorMsg || status}`);
+        
+        // Nếu là lỗi authentication (401), không thử model khác
+        if (errorObj.type === 'AUTH_ERROR' || status === 401) {
+          throw new Error(errorObj.message || 'API key không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại API key trong file .env');
+        }
+        
+        // Nếu là lỗi payment (402), không thử model khác
+        if (errorObj.type === 'PAYMENT_ERROR' || status === 402) {
+          throw new Error(errorObj.message || 'Tài khoản API không đủ credit. Vui lòng nạp thêm credit.');
+        }
         
         // Nếu là rate limit, đánh dấu và thử model tiếp theo
         if (errorObj.type === 'RATE_LIMIT' || status === 429 || 

@@ -1,7 +1,8 @@
 // Test script để kiểm tra OpenRoute API
 const axios = require('axios');
 
-const OPENROUTE_API_KEY = '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';
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const OPENROUTE_API_KEY = process.env.OPENROUTE_API_KEY || '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';
 const OPENROUTE_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 async function testAPI() {
